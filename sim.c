@@ -3,9 +3,12 @@
 #include <math.h>
 
 
-float g = 0.001;
-float friction = 1;
-float spring_constant = 0.3;
+float g = 0.00015;
+//internal friction
+float friction = 0.998;
+//bounce coefficient
+float bounce = 0.9;
+float spring_constant = 0.1;
 
 
 float Xa[10000];
@@ -18,8 +21,8 @@ int count = 0;
 
 
 int main() {
-	int Xdim = 30;
-	int Ydim = 20;
+	int Xdim = 10;
+	int Ydim = 10;
 	int N = Xdim*Ydim;
 	int N2 = (Xdim - 1)*(Ydim) + (Ydim - 1)*(Xdim) + (Xdim)*(Ydim) + (Xdim - 1)*(Ydim - 1);
 	//coordinates of points
@@ -63,7 +66,7 @@ int main() {
 		}
 	}
 	//initialize points to a grid
-	SetTargetFPS(60);
+	SetTargetFPS(400);
 	for (i = 0; i < N; ++i) {
 		momentX[i] = 0;
 		momentY[i] = 0;
@@ -74,8 +77,8 @@ int main() {
 	int height = 800;
 	InitWindow(width, height, "Soft body simulation");
 	int adding = 0;
-	int xf = 0;
-	int yf = 0;
+	int xf2 = 0;
+	int yf2 = 0;
 	while (!WindowShouldClose()) {
 		if (IsKeyPressed(88)) {
 			//remove one of the lines/obstacles
@@ -85,20 +88,22 @@ int main() {
 		}
 		BeginDrawing();
 		ClearBackground(WHITE);
-		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-			adding = 1;
-			xf = GetMousePosition().x;
-			yf = GetMousePosition().y;
-		}
-		if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)*adding) {
+		float not = 1;
+		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)*adding) {
 			adding = 0;
-			if (GetMousePosition().x != xf) {
-				Xa[count] = (float)xf;
-				Ya[count] = (float)yf;
+			not = 0;
+			if (GetMousePosition().x != xf2) {
+				Xa[count] = (float)xf2;
+				Ya[count] = (float)yf2;
 				Xb[count] = (float)GetMousePosition().x;
 				Yb[count] = (float)GetMousePosition().y;
 				++count;
 			}
+		}
+		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)*not) {
+			adding = 1;
+			xf2 = GetMousePosition().x;
+			yf2 = GetMousePosition().y;
 		}
 		//update momentum according to rules
 		for (i = 0; i < C; ++i) {
@@ -118,15 +123,20 @@ int main() {
 			momentX[i2] += ((x1 - x2)/dista)*force;
 			momentY[i2] += ((y1 - y2)/dista)*force;
 		}
-		if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+		if (IsKeyDown(77)) {
 			//then set it to move towards mouse
 			float posX = (float)GetMousePosition().x;
 			float posY = (float)GetMousePosition().y;
 			for (i = 0; i < N; ++i) {
-				momentX[i] += (posX - X[i])/10000;
-				momentY[i] += (posY - Y[i])/10000;
+				float differnc = sqrt(pow(posX - X[i], 2) + pow(posY - Y[i], 2));
+				if (differnc > 0) {
+					momentX[i] += (posX - X[i])/(differnc*1000);
+					momentY[i] += (posY - Y[i])/(differnc*1000);
+				}
 			}
 		}
+		float momentYmean = 0;
+		float momentXmean = 0;
 		for (i = 0; i < N; ++i) {
 			//first gravity
 			momentY[i] += g;
@@ -142,21 +152,27 @@ int main() {
 				//y = mx + b
 				//b = y - mx
 				float intercept = Ya[j] - (slope*Xa[j]);
-				float solCurr = slope*(X[i]) - Y[i] + intercept;
-				float solWillbe = slope*(X[i] + momentX[i]) - Y[i] - momentY[i] + intercept;
+				float solCurr = (slope*(X[i]) - Y[i] + intercept);
+				float solWillbe = (slope*(X[i] + momentX[i]) - Y[i] - momentY[i] + intercept);
 				float left = fmin(Xa[j], Xb[j]);
 				float right = fmax(Xa[j], Xb[j]);
 				if (((solCurr > 0) != (solWillbe > 0)) * ((X[i] > left) * (X[i] < right))) {
 					//then based on current trajectory, it should pass through
 					//so... just remove momentum
-					momentX[i] = 0;
-					momentY[i] = 0;
+					momentX[i] = -bounce*momentX[i];
+					momentY[i] = -bounce*momentY[i];
 					j = count; /*break secondary loop*/
 				}
 			}
 			//now forces from connected points
-			momentX[i] = friction*momentX[i];
-			momentY[i] = friction*momentY[i];
+			momentXmean += momentX[i];
+			momentYmean += momentY[i];
+		}
+		momentXmean = momentXmean/N;
+		momentYmean = momentYmean/N;
+		for (i = 0; i < N; ++i) {
+			momentX[i] = momentX[i]*friction + (1-friction)*momentXmean;
+			momentY[i] = momentY[i]*friction + (1-friction)*momentYmean;
 		}
 		//then now update position according to momentum
 		if (IsKeyPressed(82)) {
@@ -173,7 +189,7 @@ int main() {
 			DrawLine(Xa[i], Ya[i], Xb[i], Yb[i], BLACK);
 		}
 		if (adding) {
-			DrawLine(xf, yf, GetMousePosition().x, GetMousePosition().y, BLUE);
+			DrawLine(xf2, yf2, GetMousePosition().x, GetMousePosition().y, BLUE);
 		}
 		for (i = 0; i < N; ++i) {
 			DrawCircle(X[i], Y[i], 1, BLUE);
@@ -185,6 +201,8 @@ int main() {
 		}
 		DrawText("Press R to reverse direction", width/1.7, 0.1*height, 20, BLUE);
 		DrawText("Press X to remove line", width/1.7, 0.2*height, 20, BLUE);
+		DrawText("Press M to move object\ntowards the cursor", width/1.7, 0.3*height, 20, BLUE);
+		DrawText("Mouse + left click\nto draw lines", width/1.7, 0.4*height, 20, BLUE);
 		EndDrawing();
 	}
 }
